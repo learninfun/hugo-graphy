@@ -34,6 +34,8 @@ type Card struct {
 }
 
 func main() {
+	//fmt.Println("Hello World")
+	//fmt.Println(os.Args)
 	initGlobalVar()
 	confMap := getConfMap()
 
@@ -86,8 +88,11 @@ func initGlobalVar() {
 
 	currentFolder, err := os.Getwd()
 	check(err)
-
-	if tools_check.FileExists(currentFolder + pathMK + "contentOri") {
+	fmt.Println(len(os.Args))
+	if len(os.Args) >= 2 {
+		siteFolder = os.Args[1]
+		fmt.Println(siteFolder)
+	} else if tools_check.FileExists(currentFolder + pathMK + "contentOri") {
 		siteFolder = currentFolder
 	} else {
 		siteFolder = filepath.Dir(currentFolder) //如果執行目錄是在hugo-graphy那層，要先回到前一層
