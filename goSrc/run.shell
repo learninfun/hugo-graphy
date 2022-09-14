@@ -1,3 +1,4 @@
 mypath=$(pwd)
-cd themes\hugo-graphy\goSrc
+cd "$(dirname "$0")"
+ls -l
 go run hugo-graphy.go $mypath
