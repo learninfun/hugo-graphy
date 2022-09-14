@@ -3,4 +3,4 @@ cd "$(dirname "$0")"
 ls -l
 #go run hugo-graphy.go $mypath
 chmod 777 hugo-graphy
-./hugo-graphy
+./hugo-graphy $(mypath)
