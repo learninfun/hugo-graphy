@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -23,6 +24,7 @@ var (
 	pathMK           string
 	InLinkRegex      *regexp.Regexp
 	cardMap          map[string]Card
+	dirCardMap       map[string]CardDir
 )
 
 type Card struct {
@@ -33,8 +35,15 @@ type Card struct {
 	Linked []string `json:"fm"`
 }
 
+type CardDir struct {
+	Name    string   `json:"name"`
+	Url     string   `json:"url"`
+	Sub     []string `json:"sub"`     //Children node
+	SubType []string `json:"subType"` //children type: D, P
+}
+
 func main() {
-	//fmt.Println("Hello World")
+	fmt.Println("Hello World")
 	//fmt.Println(os.Args)
 	initGlobalVar()
 	confMap := getConfMap()
@@ -53,7 +62,12 @@ func main() {
 	languages, languagesFound := confMap["Languages"]
 	if !languagesFound { //without language, just walk through souseFolder
 		cardMap = make(map[string]Card)
-		filepath.Walk(sourseFolder, walkAllFile)
+		dirCardMap = make(map[string]CardDir)
+		sourceFileInfo, err := os.Lstat(sourseFolder)
+		check(err)
+		rootDirCard := convertDirToCard(sourseFolder, sourceFileInfo)
+		check(err)
+		myFileWalk(&rootDirCard, sourseFolder, sourceFileInfo)
 
 		cardMapStr := tools_convert.JsonToString(confMap)
 		tools_convert.StringToFile(graphyJsFolder+pathMK+"hugo-graphy-data.js", "hugoGraphyData="+cardMapStr)
@@ -73,12 +87,23 @@ func main() {
 			langSourceFolder = siteFolder + pathMK + "contentOri" + pathMK + langContentDirStr[8:]
 
 			cardMap = make(map[string]Card)
-			filepath.Walk(langSourceFolder, walkAllFile)
+			dirCardMap = make(map[string]CardDir)
+			sourceFileInfo, err := os.Lstat(langSourceFolder)
+			check(err)
+			rootDirCard := convertDirToCard(langSourceFolder, sourceFileInfo)
+			fileInfo, err := os.Lstat(langSourceFolder)
+			check(err)
+			myFileWalk(&rootDirCard, langSourceFolder, fileInfo)
 
-			cardMapStrB := tools_convert.JsonToStringBeauty(cardMap)
-			fmt.Println(cardMapStrB)
+			cardMapStrBeauty := tools_convert.JsonToStringBeauty(cardMap)
+			fmt.Println(cardMapStrBeauty)
+
+			cardMapStrBeauty = tools_convert.JsonToStringBeauty(dirCardMap)
+			fmt.Println(cardMapStrBeauty)
+
 			cardMapStr := tools_convert.JsonToString(cardMap)
-			tools_convert.StringToFile(graphyJsFolder+pathMK+"hugo-graphy-data_"+langName+".js", "hugoGraphyData="+cardMapStr)
+			dirCardMapStr := tools_convert.JsonToString(dirCardMap)
+			tools_convert.StringToFile(graphyJsFolder+pathMK+"hugo-graphy-data_"+langName+".js", "var hugoGraphyData="+cardMapStr+";var hugoGraphyDirData="+dirCardMapStr)
 		}
 	}
 }
@@ -96,6 +121,8 @@ func initGlobalVar() {
 		siteFolder = currentFolder
 	} else {
 		siteFolder = filepath.Dir(currentFolder) //如果執行目錄是在hugo-graphy那層，要先回到前一層
+		siteFolder = filepath.Dir(siteFolder)
+		siteFolder = filepath.Dir(siteFolder)
 	}
 
 	pathMK = string(os.PathSeparator)
@@ -109,6 +136,50 @@ func initGlobalVar() {
 	check(err)
 }
 
+func myFileWalk(parentCard *CardDir, pathSourse string, fileInfo os.FileInfo) {
+	var pathRelative = pathSourse[sourseFolderLen:]
+	var pathResult = resultFolder + pathRelative
+
+	if fileInfo.IsDir() {
+		makeFolderIfNotExist(pathResult)
+		convertDirToCard(pathSourse, fileInfo)
+		if langSourceFolder != pathSourse &&
+			!tools_check.FileExists(pathSourse+pathMK+"_index.md") &&
+			!tools_check.FileExists(pathSourse+pathMK+"_index.html") {
+			fmt.Println("Create _index.md:" + pathSourse + pathMK + "_index.md")
+			create_indexMd(fileInfo.Name(), pathResult+pathMK+"_index.md")
+		}
+
+		files, err := ioutil.ReadDir(pathSourse)
+		check(err)
+
+		fmt.Println("Folder:" + fileInfo.Name())
+		dirCard := convertDirToCard(pathSourse, fileInfo)
+		for _, subFile := range files {
+			myFileWalk(&dirCard, filepath.Join(pathSourse, subFile.Name()), subFile)
+		}
+
+		//dirArr = append(dirArr, dirCard)
+		dirCardMap[dirCard.Url] = dirCard
+
+		parentCard.Sub = append(parentCard.Sub, dirCard.Url)
+		parentCard.SubType = append(parentCard.SubType, "D")
+	} else {
+		fmt.Println("File:" + fileInfo.Name())
+		handledMarkdown := handleMarkdown(fileInfo.Name(), pathSourse, pathResult)
+		if !handledMarkdown {
+			tools_other.FileCopy(pathSourse, pathResult)
+		} else {
+			parentCard.Sub = append(parentCard.Sub, tools_convert.FileNameNoExt(fileInfo.Name()))
+			parentCard.SubType = append(parentCard.SubType, "C")
+		}
+	}
+}
+
+/**
+ * iterate all file to create new markdown with internal link
+ */
+/*
 func walkAllFile(pathSourse string, fileInfo os.FileInfo, err error) error {
 	check(err)
 
@@ -117,7 +188,7 @@ func walkAllFile(pathSourse string, fileInfo os.FileInfo, err error) error {
 	if fileInfo.IsDir() {
 		//fmt.Printf("Folder Name: %s\n", pathRelative)
 		makeFolderIfNotExist(pathResult)
-
+		convertDirToCard(pathSourse, fileInfo)
 		if langSourceFolder != pathSourse &&
 			!tools_check.FileExists(pathSourse+pathMK+"_index.md") &&
 			!tools_check.FileExists(pathSourse+pathMK+"_index.html") {
@@ -134,7 +205,11 @@ func walkAllFile(pathSourse string, fileInfo os.FileInfo, err error) error {
 
 	return nil
 }
+*/
 
+/**
+ * Handle single makdownFile to create new markdown with internal link
+ */
 func handleMarkdown(fileName, pathSourse, pathResult string) bool {
 	if strings.ToLower(filepath.Ext(pathSourse)) != ".md" { //only handle markdown
 		return false
@@ -185,6 +260,16 @@ func handleMarkdown(fileName, pathSourse, pathResult string) bool {
 	return true
 }
 
+func convertDirToCard(pathSourse string, fileInfo os.FileInfo) CardDir {
+	cardThisDir := CardDir{Name: fileInfo.Name()}
+	cardThisDir.Url = getPageUrl(pathSourse)
+
+	return cardThisDir
+}
+
+/**
+ * Get a url of page
+ */
 func getPageUrl(pathSourse string) string {
 	result := langNow + pathSourse[len(langSourceFolder):]
 
